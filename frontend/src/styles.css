@@ -1,0 +1,36 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg:        var(--bg);
+  --color-surface:   var(--bg-surface);
+  --color-border:    var(--border);
+  --color-ink:       var(--ink);
+  --color-sepia:     var(--sepia);
+  --color-dust:      var(--dust);
+  --color-link:      var(--link);
+  --color-stars:     var(--stars);
+}
+
+@layer base {
+  :root {
+    --bg:        #FAF8F4;
+    --bg-surface:#F3F0EA;
+    --border:    #E8E3D9;
+    --ink:       #2C2825;
+    --sepia:     #6B6359;
+    --dust:      #A09585;
+    --link:      #4A3728;
+    --stars:     #854F0B;
+  }
+
+  .dark {
+    --bg:        #1C1A17;
+    --bg-surface:#242119;
+    --border:    #312E28;
+    --ink:       #EDE8DF;
+    --sepia:     #A8A099;
+    --dust:      #6A6258;
+    --link:      #C8A882;
+    --stars:     #D4860E;
+  }
+}
