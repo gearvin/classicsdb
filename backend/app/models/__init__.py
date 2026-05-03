@@ -2,32 +2,44 @@ from app.models.author import Author
 from app.models.book import (
     Book,
     BookAuthor,
+    BookCover,
     BookEdition,
+    BookLanguage,
     BookTitle,
     ContributorRole,
+    EditionCover,
     EditionContributor,
     EditionFormat,
+    EditionTitle,
+    Language,
+    LanguageRole,
     TitleType,
     WorkType,
 )
 from app.models.review import Review, ReviewVote
-from app.models.user import ReadingStatus, User, UserBook, UserEdition
+from app.models.user import ReadingStatus, User, UserBook, UserBookEdition
 
 __all__ = [
     "Author",
     "Book",
     "BookAuthor",
+    "BookCover",
     "BookEdition",
+    "BookLanguage",
     "BookTitle",
     "ContributorRole",
+    "EditionCover",
     "EditionContributor",
     "EditionFormat",
+    "EditionTitle",
+    "Language",
+    "LanguageRole",
     "ReadingStatus",
     "Review",
     "ReviewVote",
     "TitleType",
     "User",
     "UserBook",
-    "UserEdition",
+    "UserBookEdition",
     "WorkType",
 ]

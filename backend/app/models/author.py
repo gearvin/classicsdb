@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from app.models.book import BookAuthor, EditionContributor
 
 
+# todo: handle alternative names
 class Author(Base):
     __tablename__ = "authors"
 

@@ -1,17 +1,11 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from pydantic_settings import BaseSettings
 
-class Settings(BaseSettings):
-  database_url: str
-  class Config:
-    env_file = ".env"
+from app.config import settings
 
-settings = Settings()
-
-engine = create_engine(settings.database_url)
+engine = create_engine(settings.database_url, echo=True)
 SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 
 def get_db():
-  with SessionLocal as db:
+  with SessionLocal() as db:
     yield db
