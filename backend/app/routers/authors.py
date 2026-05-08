@@ -5,7 +5,12 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.models.author import Author
+from app.models.entry import EntryRevision, EntryTargetType
+from app.models.user import User
 from app.schemas.author import AuthorCreate, AuthorRead, AuthorUpdate
+from app.schemas.entry import EntryRevisionRead
+from app.security import require_admin_user
+from app.services.entries import create_author_entry, update_author_entry
 
 router = APIRouter(prefix="/authors", tags=["authors"])
 
@@ -17,12 +22,13 @@ def list_authors(db: Annotated[Session, Depends(get_db)], limit: int = 50, offse
 
 
 @router.post("", response_model=AuthorRead, status_code=status.HTTP_201_CREATED)
-def create_author(payload: AuthorCreate, db: Annotated[Session, Depends(get_db)]):
-    author = Author(**payload.model_dump())
-    db.add(author)
-    db.commit()
-    db.refresh(author)
-    return author
+def create_author(
+    payload: AuthorCreate,
+    current_user: Annotated[User, Depends(require_admin_user)],
+    db: Annotated[Session, Depends(get_db)],
+    change_note: str = "",
+):
+    return create_author_entry(db, payload, changed_by=current_user, change_note=change_note)
 
 
 @router.get("/{author_id}", response_model=AuthorRead)
@@ -34,14 +40,27 @@ def get_author(author_id: int, db: Annotated[Session, Depends(get_db)]):
 
 
 @router.patch("/{author_id}", response_model=AuthorRead)
-def update_author(author_id: int, payload: AuthorUpdate, db: Annotated[Session, Depends(get_db)]):
-    author = db.get(Author, author_id)
-    if author is None:
+def update_author(
+    author_id: int,
+    payload: AuthorUpdate,
+    current_user: Annotated[User, Depends(require_admin_user)],
+    db: Annotated[Session, Depends(get_db)],
+    change_note: str = "",
+):
+    return update_author_entry(db, author_id, payload, changed_by=current_user, change_note=change_note)
+
+
+@router.get("/{author_id}/history", response_model=list[EntryRevisionRead])
+def list_author_history(author_id: int, db: Annotated[Session, Depends(get_db)]):
+    if db.get(Author, author_id) is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Author not found")
 
-    for key, value in payload.model_dump(exclude_unset=True).items():
-        setattr(author, key, value)
-
-    db.commit()
-    db.refresh(author)
-    return author
+    statement = (
+        select(EntryRevision)
+        .where(
+            EntryRevision.entity_type == EntryTargetType.AUTHOR,
+            EntryRevision.entity_id == author_id,
+        )
+        .order_by(EntryRevision.created_at.desc(), EntryRevision.id.desc())
+    )
+    return db.scalars(statement).all()

@@ -11,6 +11,7 @@ from app.db.base import Base
 
 if TYPE_CHECKING:
     from app.models.author import Author
+    from app.models.tag import BookTagVote
     from app.models.user import UserBook, UserBookEdition
 
 
@@ -117,6 +118,10 @@ class Book(Base):
         order_by="BookEdition.publication_date",
     )
     user_books: Mapped[list[UserBook]] = relationship(back_populates="book")
+    tag_votes: Mapped[list[BookTagVote]] = relationship(
+        back_populates="book",
+        cascade="all, delete-orphan",
+    )
 
     @property
     def display_title(self) -> str:

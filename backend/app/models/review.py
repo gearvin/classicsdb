@@ -9,6 +9,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base
 
 if TYPE_CHECKING:
+    from app.models.book import Book
     from app.models.user import User, UserBook, UserBookEdition
 
 
@@ -43,6 +44,11 @@ class Review(Base):
         back_populates="review",
         cascade="all, delete-orphan",
     )
+    comments: Mapped[list[ReviewComment]] = relationship(
+        back_populates="review",
+        cascade="all, delete-orphan",
+        order_by="ReviewComment.created_at",
+    )
 
     @property
     def helpful_count(self) -> int:
@@ -51,6 +57,18 @@ class Review(Base):
     @property
     def unhelpful_count(self) -> int:
         return sum(1 for vote in self.votes if not vote.is_helpful)
+
+    @property
+    def comment_count(self) -> int:
+        return len(self.comments)
+
+    @property
+    def reviewer(self) -> User:
+        return self.user_book.user
+
+    @property
+    def book(self) -> Book:
+        return self.user_book.book
 
 
 class ReviewVote(Base):
@@ -73,3 +91,26 @@ class ReviewVote(Base):
 
     review: Mapped[Review] = relationship(back_populates="votes")
     user: Mapped[User] = relationship(back_populates="review_votes")
+
+
+class ReviewComment(Base):
+    __tablename__ = "review_comments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    review_id: Mapped[int] = mapped_column(ForeignKey("reviews.id"), nullable=False, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    review: Mapped[Review] = relationship(back_populates="comments")
+    author: Mapped[User] = relationship(back_populates="review_comments")

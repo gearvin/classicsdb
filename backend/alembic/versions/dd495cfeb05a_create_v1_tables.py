@@ -1,19 +1,18 @@
-"""create tables
+"""create v1 tables
 
-
-Revision ID: b85d9c7efcf4
+Revision ID: dd495cfeb05a
 Revises: 
-Create Date: 2026-05-03 15:06:13.267987
+Create Date: 2026-05-04 22:10:22.512723
 
 """
 from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
-
+from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision: str = 'b85d9c7efcf4'
+revision: str = 'dd495cfeb05a'
 down_revision: Union[str, Sequence[str], None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -136,6 +135,29 @@ def upgrade() -> None:
     op.create_index(op.f('ix_book_titles_language_code'), 'book_titles', ['language_code'], unique=False)
     op.create_index(op.f('ix_book_titles_title'), 'book_titles', ['title'], unique=False)
     op.create_index('uq_book_titles_primary', 'book_titles', ['book_id'], unique=True, postgresql_where=sa.text('is_primary = true'))
+    op.create_table('entry_suggestions',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('suggested_by_id', sa.Integer(), nullable=False),
+    sa.Column('reviewed_by_id', sa.Integer(), nullable=True),
+    sa.Column('target_type', sa.Enum('AUTHOR', 'BOOK', 'BOOK_EDITION', name='entry_target_type'), nullable=False),
+    sa.Column('action', sa.Enum('CREATE', 'UPDATE', name='entry_action'), nullable=False),
+    sa.Column('target_id', sa.Integer(), nullable=True),
+    sa.Column('payload', postgresql.JSONB(astext_type=sa.Text()), nullable=False),
+    sa.Column('status', sa.Enum('PENDING', 'APPROVED', 'REJECTED', name='entry_suggestion_status'), nullable=False),
+    sa.Column('submitter_note', sa.Text(), nullable=False),
+    sa.Column('reviewer_note', sa.Text(), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.Column('reviewed_at', sa.DateTime(timezone=True), nullable=True),
+    sa.ForeignKeyConstraint(['reviewed_by_id'], ['users.id'], ),
+    sa.ForeignKeyConstraint(['suggested_by_id'], ['users.id'], ),
+    sa.PrimaryKeyConstraint('id')
+    )
+    op.create_index(op.f('ix_entry_suggestions_reviewed_by_id'), 'entry_suggestions', ['reviewed_by_id'], unique=False)
+    op.create_index('ix_entry_suggestions_status', 'entry_suggestions', ['status'], unique=False)
+    op.create_index(op.f('ix_entry_suggestions_suggested_by_id'), 'entry_suggestions', ['suggested_by_id'], unique=False)
+    op.create_index('ix_entry_suggestions_target', 'entry_suggestions', ['target_type', 'target_id'], unique=False)
+    op.create_index(op.f('ix_entry_suggestions_target_id'), 'entry_suggestions', ['target_id'], unique=False)
     op.create_table('user_books',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('user_id', sa.Integer(), nullable=False),
@@ -189,6 +211,25 @@ def upgrade() -> None:
     op.create_index(op.f('ix_edition_titles_edition_id'), 'edition_titles', ['edition_id'], unique=False)
     op.create_index(op.f('ix_edition_titles_language_code'), 'edition_titles', ['language_code'], unique=False)
     op.create_index('uq_edition_titles_primary', 'edition_titles', ['edition_id'], unique=True, postgresql_where=sa.text('is_primary = true'))
+    op.create_table('entry_revisions',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('entity_type', sa.Enum('AUTHOR', 'BOOK', 'BOOK_EDITION', name='entry_target_type'), nullable=False),
+    sa.Column('entity_id', sa.Integer(), nullable=False),
+    sa.Column('action', sa.Enum('CREATE', 'UPDATE', name='entry_action'), nullable=False),
+    sa.Column('changed_by_id', sa.Integer(), nullable=False),
+    sa.Column('suggestion_id', sa.Integer(), nullable=True),
+    sa.Column('before_payload', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
+    sa.Column('after_payload', postgresql.JSONB(astext_type=sa.Text()), nullable=False),
+    sa.Column('change_note', sa.Text(), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.ForeignKeyConstraint(['changed_by_id'], ['users.id'], ),
+    sa.ForeignKeyConstraint(['suggestion_id'], ['entry_suggestions.id'], ),
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('suggestion_id')
+    )
+    op.create_index(op.f('ix_entry_revisions_changed_by_id'), 'entry_revisions', ['changed_by_id'], unique=False)
+    op.create_index('ix_entry_revisions_entity', 'entry_revisions', ['entity_type', 'entity_id'], unique=False)
+    op.create_index(op.f('ix_entry_revisions_entity_id'), 'entry_revisions', ['entity_id'], unique=False)
     op.create_table('user_book_editions',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('user_book_id', sa.Integer(), nullable=False),
@@ -247,6 +288,10 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_user_book_editions_user_book_id'), table_name='user_book_editions')
     op.drop_index(op.f('ix_user_book_editions_edition_id'), table_name='user_book_editions')
     op.drop_table('user_book_editions')
+    op.drop_index(op.f('ix_entry_revisions_entity_id'), table_name='entry_revisions')
+    op.drop_index('ix_entry_revisions_entity', table_name='entry_revisions')
+    op.drop_index(op.f('ix_entry_revisions_changed_by_id'), table_name='entry_revisions')
+    op.drop_table('entry_revisions')
     op.drop_index('uq_edition_titles_primary', table_name='edition_titles', postgresql_where=sa.text('is_primary = true'))
     op.drop_index(op.f('ix_edition_titles_language_code'), table_name='edition_titles')
     op.drop_index(op.f('ix_edition_titles_edition_id'), table_name='edition_titles')
@@ -258,6 +303,12 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_user_books_user_id'), table_name='user_books')
     op.drop_index(op.f('ix_user_books_book_id'), table_name='user_books')
     op.drop_table('user_books')
+    op.drop_index(op.f('ix_entry_suggestions_target_id'), table_name='entry_suggestions')
+    op.drop_index('ix_entry_suggestions_target', table_name='entry_suggestions')
+    op.drop_index(op.f('ix_entry_suggestions_suggested_by_id'), table_name='entry_suggestions')
+    op.drop_index('ix_entry_suggestions_status', table_name='entry_suggestions')
+    op.drop_index(op.f('ix_entry_suggestions_reviewed_by_id'), table_name='entry_suggestions')
+    op.drop_table('entry_suggestions')
     op.drop_index('uq_book_titles_primary', table_name='book_titles', postgresql_where=sa.text('is_primary = true'))
     op.drop_index(op.f('ix_book_titles_title'), table_name='book_titles')
     op.drop_index(op.f('ix_book_titles_language_code'), table_name='book_titles')

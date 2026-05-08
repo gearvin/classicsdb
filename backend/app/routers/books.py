@@ -1,11 +1,10 @@
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session, aliased, selectinload
 
 from app.db.session import get_db
-from app.models.author import Author
 from app.models.book import (
     Book,
     BookAuthor,
@@ -14,10 +13,11 @@ from app.models.book import (
     BookLanguage,
     BookTitle,
     EditionContributor,
-    EditionCover,
     EditionTitle,
-    Language,
 )
+from app.models.entry import EntryRevision, EntryTargetType
+from app.models.tag import BookTagVote, Tag
+from app.models.user import User
 from app.models.user import UserBook
 from app.schemas.book import (
     BookCreate,
@@ -30,6 +30,12 @@ from app.schemas.book import (
     BookUpdate,
     PaginatedBookSummaryList,
 )
+from app.schemas.entry import EntryRevisionRead
+from app.schemas.tag import BookTagAggregate, BookTagVoteCreate, BookTagVoteRead
+from app.security import get_optional_current_active_user, require_admin_user
+from app.security import get_current_active_user
+from app.services.tags import list_book_tag_aggregates
+from app.services.entries import create_book_edition_entry, create_book_entry, update_book_entry
 
 router = APIRouter(prefix="/books", tags=["books"])
 
@@ -76,48 +82,6 @@ def _book_summary_options():
     )
 
 
-def _get_language_by_code(db: Session, code: str | None, field_name: str = "language_code") -> Language | None:
-    if code is None:
-        return None
-    language = db.scalar(select(Language).where(Language.code == code.strip().lower()))
-    if language is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid {field_name}",
-        )
-    return language
-
-
-def _require_exactly_one_primary(items: list, label: str) -> None:
-    primary_count = sum(1 for item in items if item.is_primary)
-    if primary_count != 1:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Exactly one primary {label} is required",
-        )
-
-
-def _require_at_most_one_primary(items: list, label: str) -> None:
-    primary_count = sum(1 for item in items if item.is_primary)
-    if primary_count > 1:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Only one primary {label} is allowed",
-        )
-
-
-def _require_unique_book_languages(items: list) -> None:
-    seen = set()
-    for item in items:
-        key = (item.language_code.strip().lower(), item.role)
-        if key in seen:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Duplicate book language role",
-            )
-        seen.add(key)
-
-
 def _rating_fields(average_rating: float | None, rating_count: int | None) -> dict[str, float | int | None]:
     return {
         "average_rating": round(float(average_rating), 2) if average_rating is not None else None,
@@ -129,7 +93,14 @@ def _with_rating(schema, average_rating: float | None, rating_count: int | None)
     return schema.model_copy(update=_rating_fields(average_rating, rating_count))
 
 
-def _book_with_rating_statement(order_by_title: bool = False):
+def _get_book_or_404(db: Session, book_id: int) -> Book:
+    book = db.get(Book, book_id)
+    if book is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
+    return book
+
+
+def _book_with_rating_statement(order_by_title: bool = False, order_by_recent: bool = False):
     rating_subquery = (
         select(
             UserBook.book_id.label("book_id"),
@@ -145,7 +116,9 @@ def _book_with_rating_statement(order_by_title: bool = False):
         rating_subquery.c.rating_count,
     ).outerjoin(rating_subquery, rating_subquery.c.book_id == Book.id)
 
-    if order_by_title:
+    if order_by_recent:
+        statement = statement.order_by(Book.created_at.desc(), Book.id.desc())
+    elif order_by_title:
         primary_title = aliased(BookTitle)
         statement = statement.outerjoin(
             primary_title,
@@ -155,33 +128,30 @@ def _book_with_rating_statement(order_by_title: bool = False):
     return statement
 
 
-def _build_book_title(db: Session, payload) -> BookTitle:
-    language = _get_language_by_code(db, payload.language_code)
-    title_data = payload.model_dump(exclude={"language_code"})
-    return BookTitle(**title_data, language_code=language.code)
-
-
-def _build_book_language(db: Session, payload) -> BookLanguage:
-    language = _get_language_by_code(db, payload.language_code)
-    language_data = payload.model_dump(exclude={"language_code"})
-    return BookLanguage(**language_data, language_code=language.code)
-
-
-def _build_edition_title(db: Session, payload) -> EditionTitle:
-    language = _get_language_by_code(db, payload.language_code)
-    title_data = payload.model_dump(exclude={"language_code"})
-    return EditionTitle(**title_data, language_code=language.code)
-
-
 @router.get("", response_model=PaginatedBookSummaryList)
-def list_books(db: Annotated[Session, Depends(get_db)], limit: int = 50, offset: int = 0):
-    statement = (
-        _book_with_rating_statement(order_by_title=True)
-        .options(*_book_summary_options())
-        .limit(limit)
-        .offset(offset)
-    )
-    total = db.scalar(select(func.count()).select_from(Book)) or 0
+def list_books(
+    db: Annotated[Session, Depends(get_db)],
+    limit: int = 50,
+    offset: int = 0,
+    author_id: int | None = None,
+    sort: Literal["title", "recent"] = "title",
+):
+    filters = []
+    if author_id is not None:
+        filters.append(Book.authors.any(BookAuthor.author_id == author_id))
+
+    statement = _book_with_rating_statement(
+        order_by_title=sort == "title",
+        order_by_recent=sort == "recent",
+    ).options(*_book_summary_options())
+    total_statement = select(func.count()).select_from(Book)
+
+    if filters:
+        statement = statement.where(*filters)
+        total_statement = total_statement.where(*filters)
+
+    statement = statement.limit(limit).offset(offset)
+    total = db.scalar(total_statement) or 0
     return {
         "items": [
             _with_rating(BookSummary.model_validate(book), average_rating, rating_count)
@@ -194,28 +164,13 @@ def list_books(db: Annotated[Session, Depends(get_db)], limit: int = 50, offset:
 
 
 @router.post("", response_model=BookRead, status_code=status.HTTP_201_CREATED)
-def create_book(payload: BookCreate, db: Annotated[Session, Depends(get_db)]):
-    _require_exactly_one_primary(payload.titles, "book title")
-    _require_at_most_one_primary(payload.covers, "book cover")
-    _require_unique_book_languages(payload.languages)
-
-    data = payload.model_dump(exclude={"languages", "titles", "covers", "authors"})
-    book = Book(**data)
-    book.languages = [_build_book_language(db, language) for language in payload.languages]
-    book.titles = [_build_book_title(db, title) for title in payload.titles]
-    book.covers = [BookCover(**cover.model_dump()) for cover in payload.covers]
-
-    author_ids = [a.author_id for a in payload.authors]
-    found_authors = set(db.scalars(select(Author.id).where(Author.id.in_(author_ids))).all())
-    missing_authors = set(author_ids) - found_authors
-
-    if missing_authors:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Author not found")
-    book.authors = [BookAuthor(**a.model_dump()) for a in payload.authors]
-
-    db.add(book)
-    db.commit()
-    db.refresh(book)
+def create_book(
+    payload: BookCreate,
+    current_user: Annotated[User, Depends(require_admin_user)],
+    db: Annotated[Session, Depends(get_db)],
+    change_note: str = "",
+):
+    book = create_book_entry(db, payload, changed_by=current_user, change_note=change_note)
     result = db.execute(
         _book_with_rating_statement().options(*_book_read_options()).where(Book.id == book.id)
     ).one()
@@ -234,6 +189,100 @@ def get_book(book_id: int, db: Annotated[Session, Depends(get_db)]):
     return _with_rating(BookDetail.model_validate(book), average_rating, rating_count)
 
 
+@router.get("/{book_id}/tags", response_model=list[BookTagAggregate])
+def list_book_tags(
+    book_id: int,
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User | None, Depends(get_optional_current_active_user)] = None,
+    show_all: bool = False,
+    show_spoilers: bool = False,
+):
+    _get_book_or_404(db, book_id)
+    return list_book_tag_aggregates(
+        db,
+        book_id,
+        current_user=current_user,
+        show_all=show_all,
+        show_spoilers=show_spoilers,
+    )
+
+
+@router.put("/{book_id}/tags/{tag_id}/vote", response_model=BookTagVoteRead)
+def vote_book_tag(
+    book_id: int,
+    tag_id: int,
+    payload: BookTagVoteCreate,
+    current_user: Annotated[User, Depends(get_current_active_user)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    _get_book_or_404(db, book_id)
+    tag = db.get(Tag, tag_id)
+    if tag is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tag not found")
+    if not tag.is_applicable:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This tag cannot be applied to books")
+
+    vote = db.scalar(
+        select(BookTagVote).where(
+            BookTagVote.book_id == book_id,
+            BookTagVote.tag_id == tag_id,
+            BookTagVote.user_id == current_user.id,
+        )
+    )
+    if vote is None:
+        vote = BookTagVote(
+            book_id=book_id,
+            tag_id=tag_id,
+            user_id=current_user.id,
+            vote=payload.vote,
+            spoiler_level=payload.spoiler_level,
+        )
+        db.add(vote)
+    else:
+        vote.vote = payload.vote
+        vote.spoiler_level = payload.spoiler_level
+
+    db.commit()
+    db.refresh(vote)
+    return vote
+
+
+@router.delete("/{book_id}/tags/{tag_id}/vote", status_code=status.HTTP_204_NO_CONTENT)
+def clear_book_tag_vote(
+    book_id: int,
+    tag_id: int,
+    current_user: Annotated[User, Depends(get_current_active_user)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    _get_book_or_404(db, book_id)
+    vote = db.scalar(
+        select(BookTagVote).where(
+            BookTagVote.book_id == book_id,
+            BookTagVote.tag_id == tag_id,
+            BookTagVote.user_id == current_user.id,
+        )
+    )
+    if vote is not None:
+        db.delete(vote)
+        db.commit()
+
+
+@router.get("/{book_id}/history", response_model=list[EntryRevisionRead])
+def list_book_history(book_id: int, db: Annotated[Session, Depends(get_db)]):
+    if db.get(Book, book_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
+
+    statement = (
+        select(EntryRevision)
+        .where(
+            EntryRevision.entity_type == EntryTargetType.BOOK,
+            EntryRevision.entity_id == book_id,
+        )
+        .order_by(EntryRevision.created_at.desc(), EntryRevision.id.desc())
+    )
+    return db.scalars(statement).all()
+
+
 @router.get("/{book_id}/covers", response_model=list[BookCoverRead])
 def list_book_covers(book_id: int, db: Annotated[Session, Depends(get_db)]):
     if db.get(Book, book_id) is None:
@@ -248,22 +297,14 @@ def list_book_covers(book_id: int, db: Annotated[Session, Depends(get_db)]):
 
 
 @router.patch("/{book_id}", response_model=BookRead)
-def update_book(book_id: int, payload: BookUpdate, db: Annotated[Session, Depends(get_db)]):
-    book = db.scalar(select(Book).options(*_book_read_options()).where(Book.id == book_id))
-    if book is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
-
-    updates = payload.model_dump(exclude_unset=True)
-    if "languages" in updates:
-        updates.pop("languages")
-        _require_unique_book_languages(payload.languages or [])
-        book.languages = [_build_book_language(db, language) for language in payload.languages or []]
-
-    for key, value in updates.items():
-        setattr(book, key, value)
-
-    db.commit()
-    db.refresh(book)
+def update_book(
+    book_id: int,
+    payload: BookUpdate,
+    current_user: Annotated[User, Depends(require_admin_user)],
+    db: Annotated[Session, Depends(get_db)],
+    change_note: str = "",
+):
+    book = update_book_entry(db, book_id, payload, changed_by=current_user, change_note=change_note)
     result = db.execute(
         _book_with_rating_statement().options(*_book_read_options()).where(Book.id == book.id)
     ).one()
@@ -291,34 +332,28 @@ def list_book_editions(book_id: int, db: Annotated[Session, Depends(get_db)]):
 
 
 @router.post("/{book_id}/editions", response_model=BookEditionRead, status_code=status.HTTP_201_CREATED)
-def create_book_edition(book_id: int, payload: BookEditionCreate, db: Annotated[Session, Depends(get_db)]):
-    if db.get(Book, book_id) is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
-    _require_exactly_one_primary(payload.titles, "edition title")
-    _require_at_most_one_primary(payload.covers, "edition cover")
+def create_book_edition(
+    book_id: int,
+    payload: BookEditionCreate,
+    current_user: Annotated[User, Depends(require_admin_user)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    edition = create_book_edition_entry(db, book_id, payload, changed_by=current_user)
+    return db.scalar(select(BookEdition).options(*_edition_options()).where(BookEdition.id == edition.id))
 
-    language = _get_language_by_code(db, payload.language_code)
-    data = payload.model_dump(exclude={"language_code", "titles", "covers", "contributors"})
-    edition = BookEdition(
-        **data,
-        book_id=book_id,
-        language_code=language.code if language else None,
+
+@router.get("/{book_id}/editions/{edition_id}/history", response_model=list[EntryRevisionRead])
+def list_book_edition_history(book_id: int, edition_id: int, db: Annotated[Session, Depends(get_db)]):
+    edition = db.get(BookEdition, edition_id)
+    if edition is None or edition.book_id != book_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Edition not found")
+
+    statement = (
+        select(EntryRevision)
+        .where(
+            EntryRevision.entity_type == EntryTargetType.BOOK_EDITION,
+            EntryRevision.entity_id == edition_id,
+        )
+        .order_by(EntryRevision.created_at.desc(), EntryRevision.id.desc())
     )
-    edition.titles = [_build_edition_title(db, title) for title in payload.titles]
-    edition.covers = [EditionCover(**cover.model_dump()) for cover in payload.covers]
-
-    contributor_ids = [c.author_id for c in payload.contributors]
-    found = set(db.scalars(select(Author.id).where(Author.id.in_(contributor_ids))).all())
-    missing = set(contributor_ids) - found
-    if missing:
-        raise HTTPException(404, "Contributor not found")
-    edition.contributors = [EditionContributor(**c.model_dump()) for c in payload.contributors]
-
-    db.add(edition)
-    db.commit()
-    db.refresh(edition)
-    return db.scalar(
-        select(BookEdition)
-        .options(*_edition_options())
-        .where(BookEdition.id == edition.id)
-    )
+    return db.scalars(statement).all()

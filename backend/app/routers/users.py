@@ -9,7 +9,10 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.models.book import Book, BookEdition
+from app.models.review import Review
 from app.models.user import User, UserBook, UserBookEdition
+from app.routers.reviews import _review_options
+from app.schemas.review import ReviewRead
 from app.schemas.user import (
     UserBookCreate,
     UserBookEditionCreate,
@@ -87,6 +90,22 @@ def update_me(
     return current_user
 
 
+@router.get("", response_model=list[UserPublic])
+def list_public_users(
+    db: Annotated[Session, Depends(get_db)],
+    limit: int = 50,
+    offset: int = 0,
+):
+    statement = (
+        select(User)
+        .where(User.is_active.is_(True))
+        .order_by(User.created_at.desc(), User.id.desc())
+        .limit(limit)
+        .offset(offset)
+    )
+    return db.scalars(statement).all()
+
+
 @router.get("/me/books", response_model=list[UserBookRead])
 def list_my_books(
     current_user: Annotated[User, Depends(get_current_active_user)],
@@ -137,6 +156,24 @@ def update_my_book(
     db.commit()
     db.refresh(user_book)
     return user_book
+
+
+@router.delete("/me/books/{user_book_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_my_book(
+    user_book_id: int,
+    current_user: Annotated[User, Depends(get_current_active_user)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    user_book = _get_owned_user_book(db, user_book_id, current_user.id)
+    review_id = db.scalar(select(Review.id).where(Review.user_book_id == user_book.id).limit(1))
+    if review_id is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This book has review activity and cannot be unshelved",
+        )
+
+    db.delete(user_book)
+    db.commit()
 
 
 @router.get("/me/books/{user_book_id}/editions", response_model=list[UserBookEditionRead])
@@ -211,7 +248,44 @@ def update_my_book_edition(
 
 @router.get("/{username}", response_model=UserPublic)
 def get_public_user(username: str, db: Annotated[Session, Depends(get_db)]):
-    user = db.scalar(select(User).where(User.username == username))
+    user = db.scalar(select(User).where(User.username == username, User.is_active.is_(True)))
     if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
     return user
+
+
+@router.get("/{username}/books", response_model=list[UserBookRead])
+def list_public_user_books(username: str, db: Annotated[Session, Depends(get_db)]):
+    user = db.scalar(select(User).where(User.username == username, User.is_active.is_(True)))
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    statement = (
+        select(UserBook)
+        .where(UserBook.user_id == user.id)
+        .order_by(UserBook.updated_at.desc(), UserBook.id.desc())
+    )
+    return db.scalars(statement).all()
+
+
+@router.get("/{username}/reviews", response_model=list[ReviewRead])
+def list_public_user_reviews(
+    username: str,
+    db: Annotated[Session, Depends(get_db)],
+    limit: int = 50,
+    offset: int = 0,
+):
+    user = db.scalar(select(User).where(User.username == username, User.is_active.is_(True)))
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    statement = (
+        select(Review)
+        .options(*_review_options())
+        .join(UserBook, Review.user_book_id == UserBook.id)
+        .where(UserBook.user_id == user.id, Review.is_public.is_(True))
+        .order_by(Review.created_at.desc())
+        .limit(limit)
+        .offset(offset)
+    )
+    return db.scalars(statement).all()

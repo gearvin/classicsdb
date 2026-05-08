@@ -9,28 +9,75 @@
   --color-dust:      var(--dust);
   --color-link:      var(--link);
   --color-stars:     var(--stars);
+  --color-accent:    var(--accent);
+  --color-highlight: var(--highlight);
+  --color-on-ink:    var(--on-ink);
+
+  --font-sans: 'Jost', sans-serif;
+  --font-serif: 'EB Garamond', serif;
 }
 
 @layer base {
   :root {
-    --bg:        #FAF8F4;
-    --bg-surface:#F3F0EA;
-    --border:    #E8E3D9;
-    --ink:       #2C2825;
-    --sepia:     #6B6359;
-    --dust:      #A09585;
-    --link:      #4A3728;
-    --stars:     #854F0B;
+    --bg:        #FFFFFF;
+    --bg-surface:#F4F4F4;
+    --border:    #DCDCDC;
+    --ink:       #0A0A0A;
+    --sepia:     #444444;
+    --dust:      #909090;
+    --link:      #8F2F25;
+    --stars:     #8F2F25;
+    --accent:    #8F2F25;
+    --highlight: #8F2F25;
+    --on-ink:    #FFFFFF;
+  }
+ 
+  .dark {
+    --bg:        #FFFFFF;
+    --bg-surface:#F4F4F4;
+    --border:    #DCDCDC;
+    --ink:       #0A0A0A;
+    --sepia:     #444444;
+    --dust:      #909090;
+    --link:      #C0281C;
+    --stars:     #C0281C;
+    --accent:    #C0281C;
+    --highlight: #C0281C;
+    --on-ink:    #FFFFFF;
+  }
+ 
+
+
+  html {
+    background: var(--bg);
   }
 
-  .dark {
-    --bg:        #1C1A17;
-    --bg-surface:#242119;
-    --border:    #312E28;
-    --ink:       #EDE8DF;
-    --sepia:     #A8A099;
-    --dust:      #6A6258;
-    --link:      #C8A882;
-    --stars:     #D4860E;
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    min-width: 320px;
+  }
+
+  img {
+    background: var(--bg-surface);
+  }
+
+  button:not(:disabled),
+  [role='button']:not([aria-disabled='true']) {
+    cursor: pointer;
+  }
+
+  a:focus-visible,
+  button:focus-visible,
+  input:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background: var(--highlight);
+    color: var(--on-ink);
   }
 }

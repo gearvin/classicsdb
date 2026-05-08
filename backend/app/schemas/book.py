@@ -87,6 +87,9 @@ class BookUpdate(SchemaBase):
     first_published_year: int | None = None
     work_type: WorkType | None = None
     languages: list[BookLanguageCreate] | None = None
+    titles: list[BookTitleCreate] | None = None
+    covers: list[BookCoverCreate] | None = None
+    authors: list[BookAuthorCreate] | None = None
 
 
 class BookRead(SchemaBase):

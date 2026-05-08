@@ -4,7 +4,9 @@ from datetime import datetime
 
 from pydantic import Field
 
+from app.schemas.book import BookSummary
 from app.schemas.base import SchemaBase
+from app.schemas.user import UserPublic
 
 
 class ReviewBase(SchemaBase):
@@ -30,8 +32,23 @@ class ReviewUpdate(SchemaBase):
 
 class ReviewRead(ReviewBase):
     id: int
+    book: BookSummary
+    reviewer: UserPublic
     helpful_count: int
     unhelpful_count: int
+    comment_count: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class ReviewCommentCreate(SchemaBase):
+    body: str = Field(min_length=1, max_length=5000)
+
+
+class ReviewCommentRead(ReviewCommentCreate):
+    id: int
+    review_id: int
+    author: UserPublic
     created_at: datetime
     updated_at: datetime
 

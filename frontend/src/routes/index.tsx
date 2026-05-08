@@ -1,125 +1,141 @@
+/* eslint-disable react-refresh/only-export-components */
 import { createFileRoute } from '@tanstack/react-router'
+import { useQuery } from '@tanstack/react-query'
+import { useMemo } from 'react'
+import { listBooks, type BookSummary } from '../api/books'
+import { queryKeys } from '../api/queryKeys'
+import { listReviews, type Review as ApiReview } from '../api/reviews'
+import ReviewCard, { ReviewCardSkeleton } from '../components/features/ReviewCard'
+import RecentlyAddedBookCard from '../components/features/books/RecentlyAddedBookCard'
+import { toReviewCard } from '../components/features/reviews/reviewDisplay'
 import SectionHeader from '../components/ui/SectionHeader'
-import ReviewCard, { type Review } from '../components/features/ReviewCard'
-import DiscussionRow, { type Discussion } from '../components/features/DiscussionRow'
+import { Skeleton, SkeletonCover } from '../components/ui/Skeleton'
 
 export const Route = createFileRoute('/')({
   component: Home,
 })
 
-// ── Placeholder data ───────────────────────────────────────────────────────────
+const REVIEW_LIMIT = 4
+const BOOK_LIMIT = 6
+const EMPTY_BOOKS: BookSummary[] = []
+const EMPTY_REVIEWS: ApiReview[] = []
+const RECENT_BOOK_SKELETONS = Array.from({ length: BOOK_LIMIT }, (_, index) => index)
+const REVIEW_SKELETONS = Array.from({ length: REVIEW_LIMIT }, (_, index) => index)
 
-const RECENT_REVIEWS: Review[] = [
-  {
-    id: 1,
-    bookTitle: 'Crime and Punishment',
-    author: 'Fyodor Dostoevsky',
-    rating: 4.5,
-    excerpt:
-      'Last night I had a dream where I committed a crime and also got punished... it reminded me of how I am literally Raskolnikov. Lorem ipsu...',
-    reviewer: 'joshmason',
-    date: '2026-04-24',
-    hasMore: true,
-  },
-  {
-    id: 2,
-    bookTitle: 'The Count of Monte Cristo',
-    author: 'Alexandre Dumas',
-    rating: 1,
-    excerpt: 'Placeholder text\nBottom text',
-    reviewer: 'testingguy',
-    date: '2026-04-24',
-  },
-  {
-    id: 3,
-    bookTitle: 'War and Peace',
-    author: 'Leo Tolstoy',
-    rating: 5,
-    excerpt: 'Lorem ipsum et cetera',
-    reviewer: 'example',
-    date: '2026-04-23',
-  },
-  {
-    id: 4,
-    bookTitle: 'Pride and Prejudice',
-    author: 'Jane Austen',
-    rating: 2.5,
-    excerpt: 'idk',
-    reviewer: 'joshmason',
-    date: '2026-04-22',
-    hasMore: true,
-  },
-]
+function ComingSoonBox() {
+  return (
+    <div className="rounded-xs border border-border bg-surface px-4 py-5">
+      <p className="font-serif text-lg leading-tight text-ink">Forums coming soon</p>
+      {/* <p className="mt-1 max-w-xl font-sans text-sm leading-5 text-sepia">
+        Discussion threads are planned, but the home page is keeping this space quiet until the forum API exists.
+      </p> */}
+    </div>
+  )
+}
 
-const RECENT_DISCUSSIONS: Discussion[] = [
-  {
-    id: 1,
-    title: 'i love raving (I am raskolnikov)',
-    book: 'Crime and Punishment',
-    replies: 94,
-    lastActive: '1h ago',
-  },
-  {
-    id: 2,
-    title: 'Megathread: books tagged "unreliable narrator" — recommendations',
-    replies: 340,
-    lastActive: '6h ago',
-  },
-  {
-    id: 3,
-    title: 'I don\'t like how people talk about books now',
-    book: 'The Brothers Karamazov',
-    replies: 41,
-    lastActive: '4h ago',
-  },
-  {
-    id: 4,
-    title: 'Reading group: Middlemarch week 3 — books 5 & 6',
-    book: 'Middlemarch',
-    replies: 28,
-    lastActive: '2d ago',
-  },
-]
-
-// ── Page ───────────────────────────────────────────────────────────────────────
+function RecentlyAddedBookSkeleton() {
+  return (
+    <article aria-hidden="true" className="min-w-0 animate-pulse">
+      <div className="overflow-hidden rounded-xs border border-border bg-surface">
+        <SkeletonCover className="rounded-none border-0" />
+        <div className="border-t border-border bg-bg px-2.5 py-2">
+          <Skeleton className="h-3.5 w-4/5" />
+          <Skeleton className="mt-2 h-2.5 w-3/5 bg-border/60" />
+        </div>
+      </div>
+    </article>
+  )
+}
 
 function Home() {
-  return (
-    <div>
-      {/* Title block */}
-      <div className="mb-6 pb-4 border-b-3 border-border">
-        <h1 className="font-serif font-bold text-2xl text-ink tracking-tight leading-none mb-2">
-          ClassicsDB
-        </h1>
-        <p className="font-serif text-sepia italic">
-          This is a database and forum dedicated to classic novels. WIP :)
-        </p>
-      </div>
+  const booksQuery = useQuery({
+    queryKey: queryKeys.books.list(BOOK_LIMIT, 0, { sort: 'recent' }),
+    queryFn: () => listBooks(BOOK_LIMIT, 0, { sort: 'recent' }),
+    select: data => data.items,
+  })
+  const reviewsQuery = useQuery({
+    queryKey: queryKeys.reviews.list({ limit: REVIEW_LIMIT }),
+    queryFn: () => listReviews({ limit: REVIEW_LIMIT }),
+  })
+  const books = booksQuery.data ?? EMPTY_BOOKS
+  const reviews = reviewsQuery.data ?? EMPTY_REVIEWS
+  const isBooksLoading = booksQuery.isPending
+  const isReviewsLoading = reviewsQuery.isPending
+  const queryError = booksQuery.error ?? reviewsQuery.error
+  const error = queryError instanceof Error
+    ? queryError.message
+    : queryError
+    ? 'Unable to load the latest ClassicsDB activity.'
+    : null
 
-      {/* Announcements */}
+  const reviewCards = useMemo(() => reviews.map(review => toReviewCard(review)), [reviews])
+
+  return (
+    <div className="pb-6">
+      <p className="mb-6 border-b border-border pb-4 font-sans leading-relaxed text-sepia">
+        This is a database and forum dedicated to classic novels. WIP :)
+      </p>
+
       <section className="mb-8">
-        <SectionHeader title="Announcements" href="/reviews" />
-        <div className="w-full h-15 flex justify-center items-center border border-border bg-bg">
-          <p className="font-semibold text-dust">WIP</p>
+        <SectionHeader title="Announcements" />
+        <div className="flex min-h-15 w-full items-center rounded-xs border border-border bg-surface px-4 py-3">
+          <p className="font-sans text-sm text-highlight">
+            Coming soon!
+          </p>
         </div>
       </section>
 
-      {/* Recent Reviews */}
+      {error && (
+        <p role="alert" className="mb-6 rounded-xs border border-border bg-surface px-4 py-3 font-serif italic text-sm text-sepia">
+          {error}
+        </p>
+      )}
+
+      <section className="mb-8">
+        <SectionHeader title="Recently Added" href="/browse" />
+        {isBooksLoading ? (
+          <div aria-busy="true" className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 xl:grid-cols-6">
+            {RECENT_BOOK_SKELETONS.map(index => (
+              <RecentlyAddedBookSkeleton key={index} />
+            ))}
+          </div>
+        ) : books.length === 0 ? (
+          <div className="rounded-xs border border-border bg-surface px-4 py-5">
+            <p className="font-serif italic text-sm text-sepia">No books have been added yet.</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 xl:grid-cols-6">
+            {books.map(book => (
+              <RecentlyAddedBookCard key={book.id} book={book} />
+            ))}
+          </div>
+        )}
+      </section>
+
       <section className="mb-8">
         <SectionHeader title="Recent Reviews" href="/reviews" />
-        <div className="grid grid-cols-2 grid-rows-2 gap-4 pt-2">
-          {RECENT_REVIEWS.map(review => (
-            <ReviewCard key={review.id} review={review} />
-          ))}
-        </div>
+        {isReviewsLoading ? (
+          <div aria-busy="true" className="grid grid-cols-1 gap-6 pt-2 lg:grid-cols-2">
+            {REVIEW_SKELETONS.map(index => (
+              <ReviewCardSkeleton key={index} />
+            ))}
+          </div>
+        ) : reviewCards.length === 0 ? (
+          <div className="rounded-xs border border-border bg-surface px-4 py-5">
+            <p className="font-serif italic text-sm text-sepia">No reviews have been added yet.</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 gap-6 pt-2 lg:grid-cols-2">
+            {reviewCards.map(review => (
+              <ReviewCard key={review.id} review={review} />
+            ))}
+          </div>
+        )}
       </section>
 
-      {/* Recent Discussions */}
       <section className="mb-8">
-        <SectionHeader title="Recent Discussions" href="/forums" />
-        {RECENT_DISCUSSIONS.map(discussion => (
-          <DiscussionRow key={discussion.id} discussion={discussion} />
-        ))}
+        <SectionHeader title="Forums" />
+        <ComingSoonBox />
       </section>
     </div>
   )

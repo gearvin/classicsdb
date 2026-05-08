@@ -8,17 +8,20 @@ export interface Discussion {
 
 export default function DiscussionRow({ discussion }: { discussion: Discussion }) {
   return (
-    <div className="flex items-baseline justify-between py-2.5 border-b border-border cursor-pointer group">
+    <div className="flex min-w-0 items-center justify-between gap-3 border-b border-border py-3">
       <div className="min-w-0 pr-4">
-        <div className="font-serif text-sm font-semibold text-link underline underline-offset-2 decoration-border group-hover:decoration-[#2C2A50] leading-snug">
+        <div className="break-words font-serif text-sm font-medium leading-snug text-link">
           {discussion.title}
         </div>
-        <div className="font-sans text-sm text-sepia mt-0.5">
+        <div className="mt-1 break-words font-sans text-sm text-sepia">
           {discussion.book && (
-            <span className="font-medium">{discussion.book} · </span>
+            <span className="">{discussion.book} · </span>
           )}
-          {discussion.lastActive} ({discussion.replies} replies)
+          {discussion.lastActive}
         </div>
+      </div>
+      <div className="shrink-0 font-sans text-sm text-accent">
+        {discussion.replies} replies
       </div>
     </div>
   )

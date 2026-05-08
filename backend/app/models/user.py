@@ -11,7 +11,8 @@ from app.db.base import Base
 
 if TYPE_CHECKING:
     from app.models.book import Book, BookEdition
-    from app.models.review import Review, ReviewVote
+    from app.models.review import Review, ReviewComment, ReviewVote
+    from app.models.tag import BookTagVote
 
 
 class ReadingStatus(StrEnum):
@@ -52,6 +53,39 @@ class User(Base):
         back_populates="user",
         cascade="all, delete-orphan",
     )
+    review_comments: Mapped[list[ReviewComment]] = relationship(
+        back_populates="author",
+        cascade="all, delete-orphan",
+    )
+    tag_votes: Mapped[list[BookTagVote]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+    refresh_tokens: Mapped[list[RefreshToken]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+        foreign_keys="RefreshToken.user_id",
+    )
+
+
+class RefreshToken(Base):
+    __tablename__ = "refresh_tokens"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    replaced_by_token_id: Mapped[int | None] = mapped_column(ForeignKey("refresh_tokens.id"))
+    user_agent: Mapped[str | None] = mapped_column(String(512))
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+
+    user: Mapped[User] = relationship(back_populates="refresh_tokens", foreign_keys=[user_id])
 
 
 class UserBook(Base):

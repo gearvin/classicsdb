@@ -2,19 +2,49 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.db.session import get_db
 from app.models.user import User
 from app.schemas.auth import TokenRead
 from app.schemas.user import UserCreate, UserPrivate
-from app.security import create_access_token, hash_password, verify_password
+from app.security import (
+    create_access_token,
+    create_refresh_token,
+    get_valid_refresh_token,
+    hash_password,
+    revoke_refresh_token,
+    rotate_refresh_token,
+    verify_password,
+)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+def _set_refresh_cookie(response: Response, token: str) -> None:
+    response.set_cookie(
+        key=settings.refresh_cookie_name,
+        value=token,
+        max_age=settings.refresh_token_expire_days * 24 * 60 * 60,
+        path="/api/v1/auth",
+        httponly=True,
+        secure=settings.refresh_cookie_secure,
+        samesite=settings.refresh_cookie_samesite,
+    )
+
+
+def _clear_refresh_cookie(response: Response) -> None:
+    response.delete_cookie(
+        key=settings.refresh_cookie_name,
+        path="/api/v1/auth",
+        secure=settings.refresh_cookie_secure,
+        samesite=settings.refresh_cookie_samesite,
+    )
 
 
 def _normalize_email(email: str) -> str:
@@ -61,6 +91,8 @@ def register_user(payload: UserCreate, db: Annotated[Session, Depends(get_db)]):
 def login(
     form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
     db: Annotated[Session, Depends(get_db)],
+    request: Request,
+    response: Response,
 ):
     email = _normalize_email(form_data.username)
     user = db.scalar(select(User).where(User.email == email))
@@ -73,4 +105,46 @@ def login(
     if not user.is_active:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Inactive user")
 
+    refresh_token, _ = create_refresh_token(db, user, request.headers.get("user-agent"))
+    db.commit()
+    _set_refresh_cookie(response, refresh_token)
     return TokenRead(access_token=create_access_token(str(user.id)))
+
+
+@router.post("/refresh", response_model=TokenRead)
+def refresh(
+    db: Annotated[Session, Depends(get_db)],
+    request: Request,
+    response: Response,
+    refresh_cookie: Annotated[str | None, Cookie(alias=settings.refresh_cookie_name)] = None,
+):
+    refresh_token = get_valid_refresh_token(db, refresh_cookie)
+    if refresh_token is None or refresh_token.user is None:
+        _clear_refresh_cookie(response)
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh token expired")
+
+    user = refresh_token.user
+    if not user.is_active:
+        revoke_refresh_token(refresh_token)
+        db.commit()
+        _clear_refresh_cookie(response)
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Inactive user")
+
+    next_refresh_token, _ = rotate_refresh_token(db, refresh_token, request.headers.get("user-agent"))
+    db.commit()
+    _set_refresh_cookie(response, next_refresh_token)
+    return TokenRead(access_token=create_access_token(str(user.id)))
+
+
+@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+def logout(
+    db: Annotated[Session, Depends(get_db)],
+    response: Response,
+    refresh_cookie: Annotated[str | None, Cookie(alias=settings.refresh_cookie_name)] = None,
+):
+    refresh_token = get_valid_refresh_token(db, refresh_cookie)
+    if refresh_token is not None:
+        revoke_refresh_token(refresh_token)
+        db.commit()
+
+    _clear_refresh_cookie(response)

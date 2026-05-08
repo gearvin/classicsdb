@@ -16,8 +16,10 @@ from app.models.book import (
     TitleType,
     WorkType,
 )
-from app.models.review import Review, ReviewVote
-from app.models.user import ReadingStatus, User, UserBook, UserBookEdition
+from app.models.entry import EntryAction, EntryRevision, EntrySuggestion, EntrySuggestionStatus, EntryTargetType
+from app.models.review import Review, ReviewComment, ReviewVote
+from app.models.tag import BookTagVote, Tag, TagRequest, TagRequestStatus
+from app.models.user import ReadingStatus, RefreshToken, User, UserBook, UserBookEdition
 
 __all__ = [
     "Author",
@@ -32,11 +34,22 @@ __all__ = [
     "EditionContributor",
     "EditionFormat",
     "EditionTitle",
+    "EntryAction",
+    "EntryRevision",
+    "EntrySuggestion",
+    "EntrySuggestionStatus",
+    "EntryTargetType",
     "Language",
     "LanguageRole",
     "ReadingStatus",
+    "RefreshToken",
     "Review",
+    "ReviewComment",
     "ReviewVote",
+    "BookTagVote",
+    "Tag",
+    "TagRequest",
+    "TagRequestStatus",
     "TitleType",
     "User",
     "UserBook",

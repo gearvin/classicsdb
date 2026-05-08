@@ -1,22 +1,23 @@
-import { Link } from "@tanstack/react-router";
+import { Link } from "@tanstack/react-router"
 
-export default function SectionHeader({ title, href }: { title: string; href: string }) {
+export default function SectionHeader({ title, href }: { title: string; href?: string }) {
   return (
-    <div className="flex items-baseline gap-0 mb-3">
-      <span className="text-sm font-semibold text-sepia shrink-0">
+    <div className="mb-3 flex min-w-0 items-baseline gap-0">
+      <span className="shrink-0 font-sans text-xs uppercase tracking-wide text-accent">
         {title}
       </span>
-      {/* dotted rule */}
       <span
-        className="flex-1 mx-3 border-b-2 border-dotted border-border"
+        className="mx-3 min-w-4 flex-1 border-b border-dotted border-border"
         aria-hidden
       />
-      <Link
-        to={href}
-        className="text-sm font-semibold text-sepia shrink-0 hover:text-ink"
-      >
-        More
-      </Link>
+      {href && (
+        <Link
+          to={href}
+          className="shrink-0 font-sans text-xs uppercase tracking-wide text-link transition-colors hover:text-highlight"
+        >
+          More
+        </Link>
+      )}
     </div>
   )
 }
